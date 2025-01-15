@@ -28,6 +28,10 @@ namespace winrt::TerminalApp::implementation
 
     void App::Initialize()
     {
+        // LOAD BEARING
+        AddOtherProvider(winrt::Microsoft::Terminal::Control::XamlMetaDataProvider{});
+        AddOtherProvider(winrt::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider{});
+
         const auto dispatcherQueue = winrt::Windows::System::DispatcherQueue::GetForCurrentThread();
         if (!dispatcherQueue)
         {
@@ -35,7 +39,7 @@ namespace winrt::TerminalApp::implementation
         }
         else
         {
-            _isUwp = true;
+            FAIL_FAST_MSG("Terminal is not intended to run as a Universal Windows Application");
         }
     }
 
@@ -45,31 +49,6 @@ namespace winrt::TerminalApp::implementation
         return logic;
     }
 
-    void App::Close()
-    {
-        if (_bIsClosed)
-        {
-            return;
-        }
-
-        _bIsClosed = true;
-
-        if (_windowsXamlManager)
-        {
-            _windowsXamlManager.Close();
-        }
-        _windowsXamlManager = nullptr;
-
-        Exit();
-        {
-            MSG msg = {};
-            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
-            {
-                ::DispatchMessageW(&msg);
-            }
-        }
-    }
-
     /// <summary>
     /// Invoked when the application is launched normally by the end user.  Other entry points
     /// will be used such as when the application is launched to open a specific file.
@@ -77,22 +56,15 @@ namespace winrt::TerminalApp::implementation
     /// <param name="e">Details about the launch request and process.</param>
     void App::OnLaunched(const LaunchActivatedEventArgs& /*e*/)
     {
-        // if this is a UWP... it means its our problem to hook up the content to the window here.
-        if (_isUwp)
+        // We used to support a pure UWP version of the Terminal. This method
+        // was only ever used to do UWP-specific setup of our App.
+    }
+
+    void App::PrepareForSettingsUI()
+    {
+        if (!std::exchange(_preparedForSettingsUI, true))
         {
-            auto content = Window::Current().Content();
-            if (content == nullptr)
-            {
-                auto logic = Logic();
-                logic.RunAsUwp(); // Must set UWP status first, settings might change based on it.
-                logic.ReloadSettings();
-                logic.Create();
-
-                auto page = logic.GetRoot().as<TerminalPage>();
-
-                Window::Current().Content(page);
-                Window::Current().Activate();
-            }
+            AddOtherProvider(winrt::Microsoft::Terminal::Settings::Editor::XamlMetaDataProvider{});
         }
     }
 }

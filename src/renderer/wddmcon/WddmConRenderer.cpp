@@ -181,11 +181,6 @@ CATCH_RETURN()
     return S_OK;
 }
 
-[[nodiscard]] HRESULT WddmConEngine::InvalidateSelection(const std::vector<til::rect>& /*rectangles*/) noexcept
-{
-    return S_OK;
-}
-
 [[nodiscard]] HRESULT WddmConEngine::InvalidateScroll(const til::point* const /*pcoordDelta*/) noexcept
 {
     return S_OK;
@@ -194,12 +189,6 @@ CATCH_RETURN()
 [[nodiscard]] HRESULT WddmConEngine::InvalidateAll() noexcept
 {
     return S_OK;
-}
-
-[[nodiscard]] HRESULT WddmConEngine::PrepareForTeardown(_Out_ bool* const pForcePaint) noexcept
-{
-    *pForcePaint = false;
-    return S_FALSE;
 }
 
 [[nodiscard]] HRESULT WddmConEngine::StartPaint() noexcept
@@ -258,7 +247,7 @@ CATCH_RETURN()
     return S_OK;
 }
 
-[[nodiscard]] HRESULT WddmConEngine::PaintBufferLine(const gsl::span<const Cluster> clusters,
+[[nodiscard]] HRESULT WddmConEngine::PaintBufferLine(const std::span<const Cluster> clusters,
                                                      const til::point coord,
                                                      const bool /*trimLeft*/,
                                                      const bool /*lineWrapped*/) noexcept
@@ -284,9 +273,10 @@ CATCH_RETURN()
     CATCH_RETURN();
 }
 
-[[nodiscard]] HRESULT WddmConEngine::PaintBufferGridLines(GridLineSet const /*lines*/,
-                                                          COLORREF const /*color*/,
-                                                          size_t const /*cchLine*/,
+[[nodiscard]] HRESULT WddmConEngine::PaintBufferGridLines(const GridLineSet /*lines*/,
+                                                          const COLORREF /*gridlineColor*/,
+                                                          const COLORREF /*underlineColor*/,
+                                                          const size_t /*cchLine*/,
                                                           const til::point /*coordTarget*/) noexcept
 {
     return S_OK;
@@ -353,7 +343,7 @@ CATCH_RETURN()
     return S_OK;
 }
 
-[[nodiscard]] HRESULT WddmConEngine::GetDirtyArea(gsl::span<const til::rect>& area) noexcept
+[[nodiscard]] HRESULT WddmConEngine::GetDirtyArea(std::span<const til::rect>& area) noexcept
 {
     _dirtyArea.bottom = std::max<LONG>(0, _displayHeight);
     _dirtyArea.right = std::max<LONG>(0, _displayWidth);

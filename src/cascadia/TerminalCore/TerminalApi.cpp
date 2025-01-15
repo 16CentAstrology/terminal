@@ -20,15 +20,9 @@ TRACELOGGING_DEFINE_PROVIDER(g_hCTerminalCoreProvider,
                              (0x103ac8cf, 0x97d2, 0x51aa, 0xb3, 0xba, 0x5f, 0xfd, 0x55, 0x28, 0xfa, 0x5f),
                              TraceLoggingOptionMicrosoftTelemetry());
 
-// Print puts the text in the buffer and moves the cursor
-void Terminal::PrintString(const std::wstring_view string)
-{
-    _WriteBuffer(string);
-}
-
 void Terminal::ReturnResponse(const std::wstring_view response)
 {
-    if (_pfnWriteInput)
+    if (_pfnWriteInput && !response.empty())
     {
         _pfnWriteInput(response);
     }
@@ -39,46 +33,47 @@ Microsoft::Console::VirtualTerminal::StateMachine& Terminal::GetStateMachine() n
     return *_stateMachine;
 }
 
-TextBuffer& Terminal::GetTextBuffer() noexcept
+ITerminalApi::BufferState Terminal::GetBufferAndViewport() noexcept
 {
-    return _activeBuffer();
+    return { _activeBuffer(), til::rect{ _GetMutableViewport().ToInclusive() }, !_inAltBuffer() };
 }
 
-til::rect Terminal::GetViewport() const noexcept
-{
-    return til::rect{ _GetMutableViewport().ToInclusive() };
-}
-
-void Terminal::SetViewportPosition(const til::point position) noexcept
+void Terminal::SetViewportPosition(til::point position) noexcept
+try
 {
     // The viewport is fixed at 0,0 for the alt buffer, so this is a no-op.
     if (!_inAltBuffer())
     {
-        const auto dimensions = _GetMutableViewport().Dimensions();
-        _mutableViewport = Viewport::FromDimensions(position, dimensions);
-        Terminal::_NotifyScrollEvent();
+        const auto bufferSize = _mainBuffer->GetSize().Dimensions();
+        const auto viewSize = _GetMutableViewport().Dimensions();
+
+        // Ensure the given position is in bounds.
+        position.x = std::clamp(position.x, 0, bufferSize.width - viewSize.width);
+        position.y = std::clamp(position.y, 0, bufferSize.height - viewSize.height);
+
+        const auto viewportDelta = position.y - _GetMutableViewport().Origin().y;
+        _mutableViewport = Viewport::FromDimensions(position, viewSize);
+        _PreserveUserScrollOffset(viewportDelta);
+        _NotifyScrollEvent();
     }
 }
+CATCH_LOG()
 
-void Terminal::SetTextAttributes(const TextAttribute& attrs) noexcept
+void Terminal::SetSystemMode(const Mode mode, const bool enabled) noexcept
 {
-    _activeBuffer().SetCurrentAttributes(attrs);
+    _assertLocked();
+    _systemMode.set(mode, enabled);
 }
 
-void Terminal::SetAutoWrapMode(const bool /*wrapAtEOL*/) noexcept
+bool Terminal::GetSystemMode(const Mode mode) const noexcept
 {
-    // TODO: This will be needed to support DECAWM.
+    _assertLocked();
+    return _systemMode.test(mode);
 }
 
-bool Terminal::GetAutoWrapMode() const noexcept
+void Terminal::ReturnAnswerback()
 {
-    // TODO: This will be needed to support DECAWM.
-    return true;
-}
-
-void Terminal::SetScrollingRegion(const til::inclusive_rect& /*scrollMargins*/) noexcept
-{
-    // TODO: This will be needed to fully support DECSTBM.
+    ReturnResponse(_answerbackMessage);
 }
 
 void Terminal::WarningBell()
@@ -86,70 +81,64 @@ void Terminal::WarningBell()
     _pfnWarningBell();
 }
 
-bool Terminal::GetLineFeedMode() const noexcept
-{
-    // TODO: This will be needed to support LNM.
-    return false;
-}
-
-void Terminal::LineFeed(const bool withReturn)
-{
-    auto cursorPos = _activeBuffer().GetCursor().GetPosition();
-
-    // since we explicitly just moved down a row, clear the wrap status on the
-    // row we just came from
-    _activeBuffer().GetRowByOffset(cursorPos.y).SetWrapForced(false);
-
-    cursorPos.y++;
-    if (withReturn)
-    {
-        cursorPos.x = 0;
-    }
-    _AdjustCursorPosition(cursorPos);
-}
-
 void Terminal::SetWindowTitle(const std::wstring_view title)
 {
+    _assertLocked();
     if (!_suppressApplicationTitle)
     {
-        _title.emplace(title);
+        _title.emplace(title.empty() ? _startingTitle : title);
         _pfnTitleChanged(_title.value());
     }
 }
 
 CursorType Terminal::GetUserDefaultCursorStyle() const noexcept
 {
+    _assertLocked();
     return _defaultCursorShape;
 }
 
-bool Terminal::ResizeWindow(const til::CoordType /*width*/, const til::CoordType /*height*/) noexcept
+bool Terminal::ResizeWindow(const til::CoordType width, const til::CoordType height)
 {
     // TODO: This will be needed to support various resizing sequences. See also GH#1860.
+    _assertLocked();
+
+    if (width <= 0 || height <= 0 || width > SHRT_MAX || height > SHRT_MAX)
+    {
+        return false;
+    }
+
+    if (_pfnWindowSizeChanged)
+    {
+        _pfnWindowSizeChanged(width, height);
+        return true;
+    }
+
     return false;
 }
 
-void Terminal::SetConsoleOutputCP(const unsigned int /*codepage*/) noexcept
+void Terminal::SetCodePage(const unsigned int /*codepage*/) noexcept
 {
-    // TODO: This will be needed to support 8-bit charsets and DOCS sequences.
+    // Code pages are dealt with in ConHost, so this isn't needed.
 }
 
-unsigned int Terminal::GetConsoleOutputCP() const noexcept
+void Terminal::ResetCodePage() noexcept
 {
-    // TODO: See SetConsoleOutputCP above.
+    // There is nothing to reset, since the code page never changes.
+}
+
+unsigned int Terminal::GetOutputCodePage() const noexcept
+{
+    // See above. The code page is always UTF-8.
     return CP_UTF8;
 }
 
-void Terminal::SetBracketedPasteMode(const bool enabled) noexcept
+unsigned int Terminal::GetInputCodePage() const noexcept
 {
-    _bracketedPasteMode = enabled;
+    // See above. The code page is always UTF-8.
+    return CP_UTF8;
 }
 
-std::optional<bool> Terminal::GetBracketedPasteMode() const noexcept
-{
-    return _bracketedPasteMode;
-}
-
-void Terminal::CopyToClipboard(std::wstring_view content)
+void Terminal::CopyToClipboard(wil::zwstring_view content)
 {
     _pfnCopyToClipboard(content);
 }
@@ -163,6 +152,8 @@ void Terminal::CopyToClipboard(std::wstring_view content)
 // - <none>
 void Terminal::SetTaskbarProgress(const ::Microsoft::Console::VirtualTerminal::DispatchTypes::TaskbarState state, const size_t progress)
 {
+    _assertLocked();
+
     _taskbarState = static_cast<size_t>(state);
 
     switch (state)
@@ -206,6 +197,8 @@ void Terminal::SetTaskbarProgress(const ::Microsoft::Console::VirtualTerminal::D
 
 void Terminal::SetWorkingDirectory(std::wstring_view uri)
 {
+    _assertLocked();
+
     static bool logged = false;
     if (!logged)
     {
@@ -227,19 +220,20 @@ void Terminal::PlayMidiNote(const int noteNumber, const int velocity, const std:
     _pfnPlayMidiNote(noteNumber, velocity, duration);
 }
 
-void Terminal::UseAlternateScreenBuffer()
+void Terminal::UseAlternateScreenBuffer(const TextAttribute& attrs)
 {
+    _assertLocked();
+
     // the new alt buffer is exactly the size of the viewport.
     _altBufferSize = _mutableViewport.Dimensions();
 
     const auto cursorSize = _mainBuffer->GetCursor().GetSize();
 
     ClearSelection();
-    _mainBuffer->ClearPatternRecognizers();
 
     // Create a new alt buffer
     _altBuffer = std::make_unique<TextBuffer>(_altBufferSize,
-                                              TextAttribute{},
+                                              attrs,
                                               cursorSize,
                                               true,
                                               _mainBuffer->GetRenderer());
@@ -265,7 +259,7 @@ void Terminal::UseAlternateScreenBuffer()
 
     // GH#3321: Make sure we let the TerminalInput know that we switched
     // buffers. This might affect how we interpret certain mouse events.
-    _terminalInput->UseAlternateScreenBuffer();
+    _getTerminalInput().UseAlternateScreenBuffer();
 
     // Update scrollbars
     _NotifyScrollEvent();
@@ -279,33 +273,19 @@ void Terminal::UseAlternateScreenBuffer()
 }
 void Terminal::UseMainScreenBuffer()
 {
-    // Short-circuit: do nothing.
-    if (!_inAltBuffer())
+    // To make UserResize() work as if we're back in the main buffer, we first need to unset
+    // _altBuffer, which is used throughout this class as an indicator via _inAltBuffer().
+    //
+    // We delay destroying the alt buffer instance to get a valid altBuffer->GetCursor() reference below.
+    const auto altBuffer = std::exchange(_altBuffer, nullptr);
+    if (!altBuffer)
     {
         return;
     }
 
     ClearSelection();
 
-    // Copy our cursor state back to the main buffer's cursor
-    {
-        // Update the alt buffer's cursor style, visibility, and position to match our own.
-        const auto& myCursor = _altBuffer->GetCursor();
-        auto& tgtCursor = _mainBuffer->GetCursor();
-        tgtCursor.SetStyle(myCursor.GetSize(), myCursor.GetType());
-        tgtCursor.SetIsVisible(myCursor.IsVisible());
-        tgtCursor.SetBlinkingAllowed(myCursor.IsBlinkingAllowed());
-
-        // The new position should match the viewport-relative position of the main buffer.
-        // This is the equal and opposite effect of what we did in UseAlternateScreenBuffer
-        auto tgtCursorPos = myCursor.GetPosition();
-        tgtCursorPos.y += _mutableViewport.Top();
-        tgtCursor.SetPosition(tgtCursorPos);
-    }
-
     _mainBuffer->SetAsActiveBuffer(true);
-    // destroy the alt buffer
-    _altBuffer = nullptr;
 
     if (_deferredResize.has_value())
     {
@@ -313,136 +293,36 @@ void Terminal::UseMainScreenBuffer()
         _deferredResize = std::nullopt;
     }
 
+    // After exiting the alt buffer, the main buffer should adopt the current cursor position and style.
+    // This is the equal and opposite effect of what we did in UseAlternateScreenBuffer and matches xterm.
+    //
+    // We have to do this after the call to UserResize() to ensure that the TextBuffer sizes match up.
+    // Otherwise the cursor position may be temporarily out of bounds and some code may choke on that.
+    {
+        const auto& altCursor = altBuffer->GetCursor();
+        auto& mainCursor = _mainBuffer->GetCursor();
+
+        mainCursor.SetStyle(altCursor.GetSize(), altCursor.GetType());
+        mainCursor.SetIsVisible(altCursor.IsVisible());
+        mainCursor.SetBlinkingAllowed(altCursor.IsBlinkingAllowed());
+
+        auto tgtCursorPos = altCursor.GetPosition();
+        tgtCursorPos.y += _mutableViewport.Top();
+        mainCursor.SetPosition(tgtCursorPos);
+    }
+
     // update all the hyperlinks on the screen
-    _mainBuffer->ClearPatternRecognizers();
     _updateUrlDetection();
 
     // GH#3321: Make sure we let the TerminalInput know that we switched
     // buffers. This might affect how we interpret certain mouse events.
-    _terminalInput->UseMainScreenBuffer();
+    _getTerminalInput().UseMainScreenBuffer();
 
     // Update scrollbars
     _NotifyScrollEvent();
 
     // redraw the screen
-    try
-    {
-        _activeBuffer().TriggerRedrawAll();
-    }
-    CATCH_LOG();
-}
-
-// NOTE: This is the version of AddMark that comes from VT
-void Terminal::MarkPrompt(const DispatchTypes::ScrollMark& mark)
-{
-    static bool logged = false;
-    if (!logged)
-    {
-        TraceLoggingWrite(
-            g_hCTerminalCoreProvider,
-            "ShellIntegrationMarkAdded",
-            TraceLoggingDescription("A mark was added via VT at least once"),
-            TraceLoggingKeyword(MICROSOFT_KEYWORD_MEASURES),
-            TelemetryPrivacyDataTag(PDT_ProductAndServiceUsage));
-
-        logged = true;
-    }
-
-    const til::point cursorPos{ _activeBuffer().GetCursor().GetPosition() };
-    AddMark(mark, cursorPos, cursorPos, false);
-
-    if (mark.category == DispatchTypes::MarkCategory::Prompt)
-    {
-        _currentPromptState = PromptState::Prompt;
-    }
-}
-
-void Terminal::MarkCommandStart()
-{
-    const til::point cursorPos{ _activeBuffer().GetCursor().GetPosition() };
-
-    if ((_currentPromptState == PromptState::Prompt) &&
-        (_scrollMarks.size() > 0))
-    {
-        // We were in the right state, and there's a previous mark to work
-        // with.
-        //
-        //We can just do the work below safely.
-    }
-    else
-    {
-        // If there was no last mark, or we're in a weird state,
-        // then abandon the current state, and just insert a new Prompt mark that
-        // start's & ends here, and got to State::Command.
-
-        DispatchTypes::ScrollMark mark;
-        mark.category = DispatchTypes::MarkCategory::Prompt;
-        AddMark(mark, cursorPos, cursorPos, false);
-    }
-    _scrollMarks.back().end = cursorPos;
-    _currentPromptState = PromptState::Command;
-}
-
-void Terminal::MarkOutputStart()
-{
-    const til::point cursorPos{ _activeBuffer().GetCursor().GetPosition() };
-
-    if ((_currentPromptState == PromptState::Command) &&
-        (_scrollMarks.size() > 0))
-    {
-        // We were in the right state, and there's a previous mark to work
-        // with.
-        //
-        //We can just do the work below safely.
-    }
-    else
-    {
-        // If there was no last mark, or we're in a weird state,
-        // then abandon the current state, and just insert a new Prompt mark that
-        // start's & ends here, and the command ends here, and go to State::Output.
-
-        DispatchTypes::ScrollMark mark;
-        mark.category = DispatchTypes::MarkCategory::Prompt;
-        AddMark(mark, cursorPos, cursorPos, false);
-    }
-    _scrollMarks.back().commandEnd = cursorPos;
-    _currentPromptState = PromptState::Output;
-}
-
-void Terminal::MarkCommandFinish(std::optional<unsigned int> error)
-{
-    const til::point cursorPos{ _activeBuffer().GetCursor().GetPosition() };
-    auto category = DispatchTypes::MarkCategory::Prompt;
-    if (error.has_value())
-    {
-        category = *error == 0u ?
-                       DispatchTypes::MarkCategory::Success :
-                       DispatchTypes::MarkCategory::Error;
-    }
-
-    if ((_currentPromptState == PromptState::Output) &&
-        (_scrollMarks.size() > 0))
-    {
-        // We were in the right state, and there's a previous mark to work
-        // with.
-        //
-        //We can just do the work below safely.
-    }
-    else
-    {
-        // If there was no last mark, or we're in a weird state, then abandon
-        // the current state, and just insert a new Prompt mark that start's &
-        // ends here, and the command ends here, AND the output ends here. and
-        // go to State::Output.
-
-        DispatchTypes::ScrollMark mark;
-        mark.category = DispatchTypes::MarkCategory::Prompt;
-        AddMark(mark, cursorPos, cursorPos, false);
-        _scrollMarks.back().commandEnd = cursorPos;
-    }
-    _scrollMarks.back().outputEnd = cursorPos;
-    _scrollMarks.back().category = category;
-    _currentPromptState = PromptState::None;
+    _activeBuffer().TriggerRedrawAll();
 }
 
 // Method Description:
@@ -459,11 +339,6 @@ void Terminal::ShowWindow(bool showOrHide)
     }
 }
 
-bool Terminal::IsConsolePty() const noexcept
-{
-    return false;
-}
-
 bool Terminal::IsVtInputEnabled() const noexcept
 {
     return false;
@@ -472,4 +347,57 @@ bool Terminal::IsVtInputEnabled() const noexcept
 void Terminal::NotifyAccessibilityChange(const til::rect& /*changedRect*/) noexcept
 {
     // This is only needed in conhost. Terminal handles accessibility in another way.
+}
+
+void Terminal::InvokeCompletions(std::wstring_view menuJson, unsigned int replaceLength)
+{
+    if (_pfnCompletionsChanged)
+    {
+        _pfnCompletionsChanged(menuJson, replaceLength);
+    }
+}
+
+void Terminal::SearchMissingCommand(const std::wstring_view command)
+{
+    if (_pfnSearchMissingCommand)
+    {
+        const auto bufferRow = GetCursorPosition().y;
+        _pfnSearchMissingCommand(command, bufferRow);
+    }
+}
+
+void Terminal::NotifyBufferRotation(const int delta)
+{
+    // Update our selection, so it doesn't move as the buffer is cycled
+    if (_selection->active)
+    {
+        auto selection{ _selection.write() };
+        wil::hide_name _selection;
+        // If the end of the selection will be out of range after the move, we just
+        // clear the selection. Otherwise we move both the start and end points up
+        // by the given delta and clamp to the first row.
+        if (selection->end.y < delta)
+        {
+            selection->active = false;
+        }
+        else
+        {
+            // Stash this, so we can make sure to update the pivot to match later.
+            const auto pivotWasStart = selection->start == selection->pivot;
+            selection->start.y = std::max(selection->start.y - delta, 0);
+            selection->end.y = std::max(selection->end.y - delta, 0);
+            // Make sure to sync the pivot with whichever value is the right one.
+            selection->pivot = pivotWasStart ? selection->start : selection->end;
+        }
+    }
+
+    // manually erase our pattern intervals since the locations have changed now
+    _patternIntervalTree = {};
+
+    const auto oldScrollOffset = _scrollOffset;
+    _PreserveUserScrollOffset(delta);
+    if (_scrollOffset != oldScrollOffset || AlwaysNotifyOnBufferRotation())
+    {
+        _NotifyScrollEvent();
+    }
 }

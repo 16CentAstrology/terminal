@@ -1,12 +1,15 @@
 ^attache$
 ^attacher$
 ^attachers$
+^bellow$
 benefitting
 occurences?
 ^dependan.*
+^diables?$
 ^oer$
 Sorce
 ^[Ss]pae.*
+^Teh$
 ^untill$
 ^untilling$
 ^wether.*

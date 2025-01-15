@@ -27,13 +27,12 @@ namespace Microsoft::Console::Render
 
         [[nodiscard]] HRESULT SetHwnd(const HWND hwnd) noexcept;
 
-        [[nodiscard]] HRESULT InvalidateSelection(const std::vector<til::rect>& rectangles) noexcept override;
+        [[nodiscard]] HRESULT InvalidateSelection(std::span<const til::rect> selections) noexcept override;
         [[nodiscard]] HRESULT InvalidateScroll(const til::point* const pcoordDelta) noexcept override;
         [[nodiscard]] HRESULT InvalidateSystem(const til::rect* const prcDirtyClient) noexcept override;
         [[nodiscard]] HRESULT Invalidate(const til::rect* const psrRegion) noexcept override;
         [[nodiscard]] HRESULT InvalidateCursor(const til::rect* const psrRegion) noexcept override;
         [[nodiscard]] HRESULT InvalidateAll() noexcept override;
-        [[nodiscard]] HRESULT PrepareForTeardown(_Out_ bool* const pForcePaint) noexcept override;
 
         [[nodiscard]] HRESULT StartPaint() noexcept override;
         [[nodiscard]] HRESULT EndPaint() noexcept override;
@@ -47,14 +46,18 @@ namespace Microsoft::Console::Render
                                                    const til::CoordType viewportLeft) noexcept override;
 
         [[nodiscard]] HRESULT PaintBackground() noexcept override;
-        [[nodiscard]] HRESULT PaintBufferLine(const gsl::span<const Cluster> clusters,
+        [[nodiscard]] HRESULT PaintBufferLine(const std::span<const Cluster> clusters,
                                               const til::point coord,
                                               const bool trimLeft,
                                               const bool lineWrapped) noexcept override;
         [[nodiscard]] HRESULT PaintBufferGridLines(const GridLineSet lines,
-                                                   const COLORREF color,
+                                                   const COLORREF gridlineColor,
+                                                   const COLORREF underlineColor,
                                                    const size_t cchLine,
                                                    const til::point coordTarget) noexcept override;
+        [[nodiscard]] HRESULT PaintImageSlice(const ImageSlice& imageSlice,
+                                              const til::CoordType targetRow,
+                                              const til::CoordType viewportLeft) noexcept override;
         [[nodiscard]] HRESULT PaintSelection(const til::rect& rect) noexcept override;
 
         [[nodiscard]] HRESULT PaintCursor(const CursorOptions& options) noexcept override;
@@ -66,7 +69,7 @@ namespace Microsoft::Console::Render
                                                    const bool isSettingDefaultBrushes) noexcept override;
         [[nodiscard]] HRESULT UpdateFont(const FontInfoDesired& FontInfoDesired,
                                          _Out_ FontInfo& FontInfo) noexcept override;
-        [[nodiscard]] HRESULT UpdateSoftFont(const gsl::span<const uint16_t> bitPattern,
+        [[nodiscard]] HRESULT UpdateSoftFont(const std::span<const uint16_t> bitPattern,
                                              const til::size cellSize,
                                              const size_t centeringHint) noexcept override;
         [[nodiscard]] HRESULT UpdateDpi(const int iDpi) noexcept override;
@@ -76,7 +79,7 @@ namespace Microsoft::Console::Render
                                               _Out_ FontInfo& Font,
                                               const int iDpi) noexcept override;
 
-        [[nodiscard]] HRESULT GetDirtyArea(gsl::span<const til::rect>& area) noexcept override;
+        [[nodiscard]] HRESULT GetDirtyArea(std::span<const til::rect>& area) noexcept override;
         [[nodiscard]] HRESULT GetFontSize(_Out_ til::size* const pFontSize) noexcept override;
         [[nodiscard]] HRESULT IsGlyphWideByFont(const std::wstring_view glyph, _Out_ bool* const pResult) noexcept override;
 
@@ -115,11 +118,16 @@ namespace Microsoft::Console::Render
         struct LineMetrics
         {
             int gridlineWidth;
-            int underlineOffset;
-            int underlineOffset2;
+            int underlineCenter;
             int underlineWidth;
+            int doubleUnderlinePosTop;
+            int doubleUnderlinePosBottom;
+            int doubleUnderlineWidth;
             int strikethroughOffset;
             int strikethroughWidth;
+            int curlyLineCenter;
+            int curlyLinePeriod;
+            int curlyLineControlPointOffset;
         };
 
         LineMetrics _lineMetrics;
@@ -157,7 +165,9 @@ namespace Microsoft::Console::Render
         // It's important the pool is first so it can be given to the others on construction.
         std::pmr::unsynchronized_pool_resource _pool;
         std::pmr::vector<std::pmr::wstring> _polyStrings;
-        std::pmr::vector<std::pmr::basic_string<int>> _polyWidths;
+        std::pmr::vector<std::pmr::vector<int>> _polyWidths;
+
+        std::vector<DWORD> _imageMask;
 
         [[nodiscard]] HRESULT _InvalidCombine(const til::rect* const prc) noexcept;
         [[nodiscard]] HRESULT _InvalidOffset(const til::point* const ppt) noexcept;

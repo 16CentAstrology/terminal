@@ -1,11 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-#include "pch.h"
+#pragma once
 #include "BaseWindow.h"
-#include <winrt/TerminalApp.h>
-
-void SetWindowLongWHelper(const HWND hWnd, const int nIndex, const LONG dwNewLong) noexcept;
 
 struct SystemMenuItemInfo
 {
@@ -21,11 +18,15 @@ public:
     virtual ~IslandWindow() override;
 
     virtual void MakeWindow() noexcept;
-    void Close();
+    virtual void Close();
+
     virtual void OnSize(const UINT width, const UINT height);
     HWND GetInteropHandle() const;
 
     [[nodiscard]] virtual LRESULT MessageHandler(UINT const message, WPARAM const wparam, LPARAM const lparam) noexcept override;
+
+    [[nodiscard]] LRESULT OnNcCreate(WPARAM wParam, LPARAM lParam) noexcept override;
+
     void OnResize(const UINT width, const UINT height) override;
     void OnMinimize() override;
     void OnRestore() override;
@@ -37,7 +38,8 @@ public:
 
     virtual void Initialize();
 
-    void SetCreateCallback(std::function<void(const HWND, const til::rect&, winrt::Microsoft::Terminal::Settings::Model::LaunchMode& launchMode)> pfn) noexcept;
+    void SetCreateCallback(std::function<void(const HWND, const til::rect&)> pfn) noexcept;
+
     void SetSnapDimensionCallback(std::function<float(bool widthOrHeight, float dimension)> pfn) noexcept;
 
     void FocusModeChanged(const bool focusMode);
@@ -48,10 +50,7 @@ public:
     void FlashTaskbar();
     void SetTaskbarProgress(const size_t state, const size_t progress);
 
-    void UnregisterHotKey(const int index) noexcept;
-    bool RegisterHotKey(const int index, const winrt::Microsoft::Terminal::Control::KeyChord& hotkey) noexcept;
-
-    winrt::fire_and_forget SummonWindow(winrt::Microsoft::Terminal::Remoting::SummonWindowBehavior args);
+    void SummonWindow(winrt::TerminalApp::SummonWindowBehavior args);
 
     bool IsQuakeWindow() const noexcept;
     void IsQuakeWindow(bool isQuakeWindow) noexcept;
@@ -65,25 +64,22 @@ public:
     void AddToSystemMenu(const winrt::hstring& itemLabel, winrt::delegate<void()> callback);
     void RemoveFromSystemMenu(const winrt::hstring& itemLabel);
 
+    void UseDarkTheme(const bool v);
     virtual void UseMica(const bool newValue, const double titlebarOpacity);
 
-    WINRT_CALLBACK(DragRegionClicked, winrt::delegate<>);
-    WINRT_CALLBACK(WindowCloseButtonClicked, winrt::delegate<>);
-    WINRT_CALLBACK(MouseScrolled, winrt::delegate<void(til::point, int32_t)>);
-    WINRT_CALLBACK(WindowActivated, winrt::delegate<void(bool)>);
-    WINRT_CALLBACK(HotkeyPressed, winrt::delegate<void(long)>);
-    WINRT_CALLBACK(NotifyNotificationIconPressed, winrt::delegate<void()>);
-    WINRT_CALLBACK(NotifyWindowHidden, winrt::delegate<void()>);
-    WINRT_CALLBACK(NotifyShowNotificationIconContextMenu, winrt::delegate<void(til::point)>);
-    WINRT_CALLBACK(NotifyNotificationIconMenuItemSelected, winrt::delegate<void(HMENU, UINT)>);
-    WINRT_CALLBACK(NotifyReAddNotificationIcon, winrt::delegate<void()>);
-    WINRT_CALLBACK(ShouldExitFullscreen, winrt::delegate<void()>);
-    WINRT_CALLBACK(MaximizeChanged, winrt::delegate<void(bool)>);
-    WINRT_CALLBACK(AutomaticShutdownRequested, winrt::delegate<void(void)>);
+    til::event<winrt::delegate<>> DragRegionClicked;
+    til::event<winrt::delegate<>> WindowCloseButtonClicked;
+    til::event<winrt::delegate<void(winrt::Windows::Foundation::Point, int32_t)>> MouseScrolled;
+    til::event<winrt::delegate<void(bool)>> WindowActivated;
+    til::event<winrt::delegate<void()>> NotifyNotificationIconPressed;
+    til::event<winrt::delegate<void()>> NotifyWindowHidden;
+    til::event<winrt::delegate<void(HMENU, UINT)>> NotifyNotificationIconMenuItemSelected;
+    til::event<winrt::delegate<void()>> NotifyReAddNotificationIcon;
+    til::event<winrt::delegate<void()>> ShouldExitFullscreen;
+    til::event<winrt::delegate<void(bool)>> MaximizeChanged;
 
-    WINRT_CALLBACK(WindowMoved, winrt::delegate<void()>);
-    WINRT_CALLBACK(WindowVisibilityChanged, winrt::delegate<void(bool)>);
-    WINRT_CALLBACK(UpdateSettingsRequested, winrt::delegate<void()>);
+    til::event<winrt::delegate<void()>> WindowMoved;
+    til::event<winrt::delegate<void(bool)>> WindowVisibilityChanged;
 
 protected:
     void ForceResize()
@@ -95,11 +91,11 @@ protected:
 
     HWND _interopWindowHandle;
 
-    winrt::Windows::UI::Xaml::Hosting::DesktopWindowXamlSource _source;
-    winrt::Windows::UI::Xaml::Controls::Grid _rootGrid;
+    winrt::Windows::UI::Xaml::Hosting::DesktopWindowXamlSource _source; // nulled in ctor
+    winrt::Windows::UI::Xaml::Controls::Grid _rootGrid; // nulled in ctor
     wil::com_ptr<ITaskbarList3> _taskbar;
 
-    std::function<void(const HWND, const til::rect&, winrt::Microsoft::Terminal::Settings::Model::LaunchMode& launchMode)> _pfnCreateCallback;
+    std::function<void(const HWND, const til::rect&)> _pfnCreateCallback;
     std::function<float(bool, float)> _pfnSnapDimensionCallback;
 
     void _HandleCreateWindow(const WPARAM wParam, const LPARAM lParam) noexcept;
@@ -122,19 +118,18 @@ protected:
     LONG _getDesiredWindowStyle() const;
 
     void _OnGetMinMaxInfo(const WPARAM wParam, const LPARAM lParam);
-    long _calculateTotalSize(const bool isWidth, const long clientSize, const long nonClientSize);
 
     void _globalActivateWindow(const uint32_t dropdownDuration,
-                               const winrt::Microsoft::Terminal::Remoting::MonitorBehavior toMonitor);
+                               const winrt::TerminalApp::MonitorBehavior toMonitor);
     void _dropdownWindow(const uint32_t dropdownDuration,
-                         const winrt::Microsoft::Terminal::Remoting::MonitorBehavior toMonitor);
+                         const winrt::TerminalApp::MonitorBehavior toMonitor);
     void _slideUpWindow(const uint32_t dropdownDuration);
     void _doSlideAnimation(const uint32_t dropdownDuration, const bool down);
     void _globalDismissWindow(const uint32_t dropdownDuration);
 
     static MONITORINFO _getMonitorForCursor();
     static MONITORINFO _getMonitorForWindow(HWND foregroundWindow);
-    void _moveToMonitor(HWND foregroundWindow, const winrt::Microsoft::Terminal::Remoting::MonitorBehavior toMonitor);
+    void _moveToMonitor(HWND foregroundWindow, const winrt::TerminalApp::MonitorBehavior toMonitor);
     void _moveToMonitorOfMouse();
     void _moveToMonitorOf(HWND foregroundWindow);
     void _moveToMonitor(const MONITORINFO activeMonitor);
@@ -145,19 +140,18 @@ protected:
     void _enterQuakeMode();
     til::rect _getQuakeModeSize(HMONITOR hmon);
 
-    void _summonWindowRoutineBody(winrt::Microsoft::Terminal::Remoting::SummonWindowBehavior args);
-
     bool _minimizeToNotificationArea{ false };
 
     std::unordered_map<UINT, SystemMenuItemInfo> _systemMenuItems;
     UINT _systemMenuNextItemId;
+    void _resetSystemMenu();
 
 private:
     // This minimum width allows for width the tabs fit
-    static constexpr long minimumWidth = 460L;
+    static constexpr float minimumWidth = 460;
 
     // We run with no height requirement for client area,
     // though the total height will take into account the non-client area
     // and the requirements of components hosted in the client area
-    static constexpr long minimumHeight = 0L;
+    static constexpr float minimumHeight = 0;
 };
