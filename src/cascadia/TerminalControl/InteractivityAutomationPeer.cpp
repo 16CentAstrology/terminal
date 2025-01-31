@@ -35,14 +35,19 @@ namespace winrt::Microsoft::Terminal::Control::implementation
         THROW_IF_FAILED(::Microsoft::WRL::MakeAndInitialize<::Microsoft::Terminal::TermControlUiaProvider>(&_uiaProvider, _interactivity->GetRenderData(), this));
     };
 
+    // Bounds is expected to be in pixels.
     void InteractivityAutomationPeer::SetControlBounds(const Windows::Foundation::Rect bounds)
     {
-        _controlBounds = til::rect{ til::math::rounding, bounds };
+        _controlBounds = { til::math::rounding, bounds };
     }
+
+    // Padding is expected to be in DIPs.
     void InteractivityAutomationPeer::SetControlPadding(const Core::Padding padding)
     {
-        _controlPadding = til::rect{ til::math::rounding, padding };
+        const auto scale = static_cast<float>(DisplayInformation::GetForCurrentView().RawPixelsPerViewPixel());
+        _controlPadding = { til::math::rounding, padding.Left * scale, padding.Top * scale, padding.Right * scale, padding.Bottom * scale };
     }
+
     void InteractivityAutomationPeer::ParentProvider(AutomationPeer parentProvider)
     {
         _parentProvider = parentProvider;
@@ -60,7 +65,7 @@ namespace winrt::Microsoft::Terminal::Control::implementation
     // - <none>
     void InteractivityAutomationPeer::SignalSelectionChanged()
     {
-        _SelectionChangedHandlers(*this, nullptr);
+        SelectionChanged.raise(*this, nullptr);
     }
 
     // Method Description:
@@ -75,7 +80,7 @@ namespace winrt::Microsoft::Terminal::Control::implementation
     // - <none>
     void InteractivityAutomationPeer::SignalTextChanged()
     {
-        _TextChangedHandlers(*this, nullptr);
+        TextChanged.raise(*this, nullptr);
     }
 
     // Method Description:
@@ -90,12 +95,12 @@ namespace winrt::Microsoft::Terminal::Control::implementation
     // - <none>
     void InteractivityAutomationPeer::SignalCursorChanged()
     {
-        _CursorChangedHandlers(*this, nullptr);
+        CursorChanged.raise(*this, nullptr);
     }
 
     void InteractivityAutomationPeer::NotifyNewOutput(std::wstring_view newOutput)
     {
-        _NewOutputHandlers(*this, hstring{ newOutput });
+        NewOutput.raise(*this, hstring{ newOutput });
     }
 
 #pragma region ITextProvider
@@ -169,14 +174,9 @@ namespace winrt::Microsoft::Terminal::Control::implementation
         return _controlPadding;
     }
 
-    double InteractivityAutomationPeer::GetScaleFactor() const noexcept
-    {
-        return DisplayInformation::GetForCurrentView().RawPixelsPerViewPixel();
-    }
-
     void InteractivityAutomationPeer::ChangeViewport(const til::inclusive_rect& NewWindow)
     {
-        _interactivity->UpdateScrollbar(NewWindow.top);
+        _interactivity->UpdateScrollbar(static_cast<float>(NewWindow.top));
     }
 #pragma endregion
 

@@ -105,20 +105,21 @@ bool ShouldTakeOverKeyboardShortcuts()
 
 // Routine Description:
 // - handles key events without reference to Win32 elements.
-void HandleGenericKeyEvent(_In_ KeyEvent keyEvent, const bool generateBreak)
+void HandleGenericKeyEvent(INPUT_RECORD event, const bool generateBreak)
 {
+    auto& keyEvent = event.Event.KeyEvent;
     const auto& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
     auto ContinueProcessing = true;
 
-    if (keyEvent.IsCtrlPressed() &&
-        !keyEvent.IsAltPressed() &&
-        keyEvent.IsKeyDown())
+    if (WI_IsAnyFlagSet(keyEvent.dwControlKeyState, CTRL_PRESSED) &&
+        WI_AreAllFlagsClear(keyEvent.dwControlKeyState, ALT_PRESSED) &&
+        keyEvent.bKeyDown)
     {
         // check for ctrl-c, if in line input mode.
-        if (keyEvent.GetVirtualKeyCode() == 'C' && IsInProcessedInputMode())
+        if (keyEvent.wVirtualKeyCode == 'C' && IsInProcessedInputMode())
         {
             HandleCtrlEvent(CTRL_C_EVENT);
-            if (gci.PopupCount == 0)
+            if (!gci.HasPendingPopup())
             {
                 gci.pInputBuffer->TerminateRead(WaitTerminationReason::CtrlC);
             }
@@ -130,11 +131,11 @@ void HandleGenericKeyEvent(_In_ KeyEvent keyEvent, const bool generateBreak)
         }
 
         // Check for ctrl-break.
-        else if (keyEvent.GetVirtualKeyCode() == VK_CANCEL)
+        else if (keyEvent.wVirtualKeyCode == VK_CANCEL)
         {
             gci.pInputBuffer->Flush();
             HandleCtrlEvent(CTRL_BREAK_EVENT);
-            if (gci.PopupCount == 0)
+            if (!gci.HasPendingPopup())
             {
                 gci.pInputBuffer->TerminateRead(WaitTerminationReason::CtrlBreak);
             }
@@ -146,33 +147,25 @@ void HandleGenericKeyEvent(_In_ KeyEvent keyEvent, const bool generateBreak)
         }
 
         // don't write ctrl-esc to the input buffer
-        else if (keyEvent.GetVirtualKeyCode() == VK_ESCAPE)
+        else if (keyEvent.wVirtualKeyCode == VK_ESCAPE)
         {
             ContinueProcessing = false;
         }
     }
-    else if (keyEvent.IsAltPressed() &&
-             keyEvent.IsKeyDown() &&
-             keyEvent.GetVirtualKeyCode() == VK_ESCAPE)
+    else if (WI_IsAnyFlagSet(keyEvent.dwControlKeyState, ALT_PRESSED) &&
+             keyEvent.bKeyDown &&
+             keyEvent.wVirtualKeyCode == VK_ESCAPE)
     {
         ContinueProcessing = false;
     }
 
     if (ContinueProcessing)
     {
-        size_t EventsWritten = 0;
-        try
+        gci.pInputBuffer->Write(event);
+        if (generateBreak)
         {
-            EventsWritten = gci.pInputBuffer->Write(std::make_unique<KeyEvent>(keyEvent));
-            if (EventsWritten && generateBreak)
-            {
-                keyEvent.SetKeyDown(false);
-                EventsWritten = gci.pInputBuffer->Write(std::make_unique<KeyEvent>(keyEvent));
-            }
-        }
-        catch (...)
-        {
-            LOG_HR(wil::ResultFromCaughtException());
+            keyEvent.bKeyDown = false;
+            gci.pInputBuffer->Write(event);
         }
     }
 }
@@ -195,8 +188,7 @@ void HandleFocusEvent(const BOOL fSetFocus)
 
     try
     {
-        const auto EventsWritten = gci.pInputBuffer->Write(std::make_unique<FocusEvent>(!!fSetFocus));
-        FAIL_FAST_IF(EventsWritten != 1);
+        gci.pInputBuffer->WriteFocusEvent(fSetFocus);
     }
     catch (...)
     {
@@ -211,10 +203,10 @@ void HandleMenuEvent(const DWORD wParam)
     size_t EventsWritten = 0;
     try
     {
-        EventsWritten = gci.pInputBuffer->Write(std::make_unique<MenuEvent>(wParam));
+        EventsWritten = gci.pInputBuffer->Write(SynthesizeMenuEvent(wParam));
         if (EventsWritten != 1)
         {
-            RIPMSG0(RIP_WARNING, "PutInputInBuffer: EventsWritten != 1, 1 expected");
+            LOG_HR_MSG(E_FAIL, "PutInputInBuffer: EventsWritten != 1, 1 expected");
         }
     }
     catch (...)
@@ -238,7 +230,7 @@ void HandleCtrlEvent(const DWORD EventType)
         gci.CtrlFlags |= CONSOLE_CTRL_CLOSE_FLAG;
         break;
     default:
-        RIPMSG1(RIP_ERROR, "Invalid EventType: 0x%x", EventType);
+        LOG_HR_MSG(E_INVALIDARG, "Invalid EventType: 0x%x", EventType);
     }
 }
 
@@ -329,28 +321,35 @@ void ProcessCtrlEvents()
         return;
     }
 
-    auto Status = STATUS_SUCCESS;
+    const auto ctrl = ServiceLocator::LocateConsoleControl();
+
     for (const auto& r : termRecords)
     {
-        /*
-         * Status will be non-successful if a process attached to this console
-         * vetoes shutdown. In that case, we don't want to try to kill any more
-         * processes, but we do need to make sure we continue looping so we
-         * can close any remaining process handles. The exception is if the
-         * process is inaccessible, such that we can't even open a handle for
-         * query. In this case, use best effort to send the close event but
-         * ignore any errors.
-         */
-        if (NT_SUCCESS(Status))
-        {
-            Status = ServiceLocator::LocateConsoleControl()
-                         ->EndTask(r.dwProcessID,
-                                   EventType,
-                                   CtrlFlags);
-            if (!r.hProcess)
-            {
-                Status = STATUS_SUCCESS;
-            }
-        }
+        // Older versions of Windows would do various things if the EndTask() call failed:
+        // * XP: Pops up a "Windows can't end this program" dialog for every already-dead process.
+        // * Vista - Win 7: Simply skips over already-dead processes.
+        // * Win 8 - Win 11 26100: Aborts on an already-dead process (you have to WM_CLOSE conhost multiple times).
+        //
+        // That last period had the following comment:
+        //   Status will be non-successful if a process attached to this console
+        //   vetoes shutdown. In that case, we don't want to try to kill any more
+        //   processes, but we do need to make sure we continue looping so we
+        //   can close any remaining process handles. The exception is if the
+        //   process is inaccessible, such that we can't even open a handle for
+        //   query. In this case, use best effort to send the close event but
+        //   ignore any errors.
+        //
+        // The corresponding logic worked like this:
+        //   if (FAILED(EndTask(...)) && r.hProcess) {
+        //       break;
+        //   }
+        //
+        // That logic was removed around the Windows 11 26100 time frame, because CSRSS
+        // (which handles EndTask) now waits 5s and then force-kills the process for us.
+        // Going back to the Win 7 behavior then should make shutdown a lot more robust.
+        // The bad news is that EndTask() returns STATUS_UNSUCCESSFUL no matter whether
+        // the process was already dead, or if the request actually failed for some reason.
+        // Hopefully there aren't any regressions, but we can't know without trying.
+        LOG_IF_NTSTATUS_FAILED(ctrl->EndTask(r.dwProcessID, EventType, CtrlFlags));
     }
 }

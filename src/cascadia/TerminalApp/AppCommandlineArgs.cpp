@@ -97,7 +97,7 @@ int AppCommandlineArgs::ParseCommand(const Commandline& command)
 }
 
 // Method Description:
-// - Calls App::exit() for the provided command, and collects it's output into
+// - Calls App::exit() for the provided command, and collects its output into
 //   our _exitMessage buffer.
 // Arguments:
 // - command: Either the root App object, or a subcommand for which to call exit() on.
@@ -209,6 +209,7 @@ void AppCommandlineArgs::_buildParser()
     _buildMovePaneParser();
     _buildSwapPaneParser();
     _buildFocusPaneParser();
+    _buildSaveSnippetParser();
 }
 
 // Method Description:
@@ -340,7 +341,7 @@ void AppCommandlineArgs::_buildMovePaneParser()
             if (_movePaneTabIndex >= 0)
             {
                 movePaneAction.Action(ShortcutAction::MovePane);
-                MovePaneArgs args{ static_cast<unsigned int>(_movePaneTabIndex) };
+                MovePaneArgs args{ static_cast<unsigned int>(_movePaneTabIndex), L"" };
                 movePaneAction.Args(args);
                 _startupActions.push_back(movePaneAction);
             }
@@ -537,6 +538,72 @@ void AppCommandlineArgs::_buildFocusPaneParser()
     setupSubcommand(_focusPaneShort);
 }
 
+void AppCommandlineArgs::_buildSaveSnippetParser()
+{
+    _saveCommand = _app.add_subcommand("x-save", RS_A(L"SaveSnippetDesc"));
+
+    auto setupSubcommand = [this](auto* subcommand) {
+        subcommand->add_option("--name,-n", _saveInputName, RS_A(L"SaveSnippetArgDesc"));
+        subcommand->add_option("--keychord,-k", _keyChordOption, RS_A(L"KeyChordArgDesc"));
+        subcommand->add_option("command,", _commandline, RS_A(L"CmdCommandArgDesc"));
+        subcommand->positionals_at_end(true);
+
+        // When ParseCommand is called, if this subcommand was provided, this
+        // callback function will be triggered on the same thread. We can be sure
+        // that `this` will still be safe - this function just lets us know this
+        // command was parsed.
+        subcommand->callback([&, this]() {
+            // Build the action from the values we've parsed on the commandline.
+            ActionAndArgs saveSnippet{};
+            saveSnippet.Action(ShortcutAction::SaveSnippet);
+            // First, parse out the commandline in the same way that
+            // _getNewTerminalArgs does it
+            SaveSnippetArgs args{};
+
+            if (!_commandline.empty())
+            {
+                std::ostringstream cmdlineBuffer;
+
+                for (const auto& arg : _commandline)
+                {
+                    if (cmdlineBuffer.tellp() != 0)
+                    {
+                        // If there's already something in here, prepend a space
+                        cmdlineBuffer << ' ';
+                    }
+
+                    if (arg.find(" ") != std::string::npos)
+                    {
+                        cmdlineBuffer << '"' << arg << '"';
+                    }
+                    else
+                    {
+                        cmdlineBuffer << arg;
+                    }
+                }
+
+                args.Commandline(winrt::to_hstring(cmdlineBuffer.str()));
+            }
+
+            if (!_keyChordOption.empty())
+            {
+                args.KeyChord(winrt::to_hstring(_keyChordOption));
+            }
+
+            if (!_saveInputName.empty())
+            {
+                winrt::hstring hString = winrt::to_hstring(_saveInputName);
+                args.Name(hString);
+            }
+
+            saveSnippet.Args(args);
+            _startupActions.push_back(saveSnippet);
+        });
+    };
+
+    setupSubcommand(_saveCommand);
+}
+
 // Method Description:
 // - Add the `NewTerminalArgs` parameters to the given subcommand. This enables
 //   that subcommand to support all the properties in a NewTerminalArgs.
@@ -549,6 +616,9 @@ void AppCommandlineArgs::_addNewTerminalArgs(AppCommandlineArgs::NewTerminalSubc
     subcommand.profileNameOption = subcommand.subcommand->add_option("-p,--profile",
                                                                      _profileName,
                                                                      RS_A(L"CmdProfileArgDesc"));
+    subcommand.sessionIdOption = subcommand.subcommand->add_option("--sessionId",
+                                                                   _sessionId,
+                                                                   RS_A(L"CmdSessionIdArgDesc"));
     subcommand.startingDirectoryOption = subcommand.subcommand->add_option("-d,--startingDirectory",
                                                                            _startingDirectory,
                                                                            RS_A(L"CmdStartingDirArgDesc"));
@@ -568,6 +638,14 @@ void AppCommandlineArgs::_addNewTerminalArgs(AppCommandlineArgs::NewTerminalSubc
     subcommand.colorSchemeOption = subcommand.subcommand->add_option("--colorScheme",
                                                                      _startingColorScheme,
                                                                      RS_A(L"CmdColorSchemeArgDesc"));
+
+    subcommand.appendCommandLineOption = subcommand.subcommand->add_flag("--appendCommandLine", _appendCommandLineOption, RS_A(L"CmdAppendCommandLineDesc"));
+
+    subcommand.inheritEnvOption = subcommand.subcommand->add_flag(
+        "--inheritEnvironment,!--reloadEnvironment",
+        _inheritEnvironment,
+        RS_A(L"CmdInheritEnvDesc"));
+
     // Using positionals_at_end allows us to support "wt new-tab -d wsl -d Ubuntu"
     // without CLI11 thinking that we've specified -d twice.
     // There's an alternate construction where we make all subcommands "prefix commands",
@@ -589,7 +667,8 @@ NewTerminalArgs AppCommandlineArgs::_getNewTerminalArgs(AppCommandlineArgs::NewT
 {
     NewTerminalArgs args{};
 
-    if (!_commandline.empty())
+    const auto hasCommandline{ !_commandline.empty() };
+    if (hasCommandline)
     {
         std::ostringstream cmdlineBuffer;
 
@@ -617,6 +696,13 @@ NewTerminalArgs AppCommandlineArgs::_getNewTerminalArgs(AppCommandlineArgs::NewT
     if (*subcommand.profileNameOption)
     {
         args.Profile(winrt::to_hstring(_profileName));
+    }
+
+    if (*subcommand.sessionIdOption)
+    {
+        const auto str = winrt::to_hstring(_sessionId);
+        const auto id = ::Microsoft::Console::Utils::GuidFromString(str.c_str());
+        args.SessionId(id);
     }
 
     if (*subcommand.startingDirectoryOption)
@@ -654,6 +740,17 @@ NewTerminalArgs AppCommandlineArgs::_getNewTerminalArgs(AppCommandlineArgs::NewT
     {
         args.ColorScheme(winrt::to_hstring(_startingColorScheme));
     }
+    if (*subcommand.appendCommandLineOption)
+    {
+        args.AppendCommandLine(_appendCommandLineOption);
+    }
+
+    bool inheritEnv = hasCommandline;
+    if (*subcommand.inheritEnvOption)
+    {
+        inheritEnv = _inheritEnvironment;
+    }
+    args.ReloadEnvironmentVariables(!inheritEnv);
 
     return args;
 }
@@ -680,7 +777,8 @@ bool AppCommandlineArgs::_noCommandsProvided()
              *_focusPaneCommand ||
              *_focusPaneShort ||
              *_newPaneShort.subcommand ||
-             *_newPaneCommand.subcommand);
+             *_newPaneCommand.subcommand ||
+             *_saveCommand);
 }
 
 // Method Description:
@@ -694,11 +792,13 @@ bool AppCommandlineArgs::_noCommandsProvided()
 void AppCommandlineArgs::_resetStateToDefault()
 {
     _profileName.clear();
+    _sessionId.clear();
     _startingDirectory.clear();
     _startingTitle.clear();
     _startingTabColor.clear();
     _commandline.clear();
     _suppressApplicationTitle = false;
+    _appendCommandLineOption = false;
 
     _splitVertical = false;
     _splitHorizontal = false;
@@ -733,7 +833,7 @@ void AppCommandlineArgs::_resetStateToDefault()
 // Return Value:
 // - a list of Commandline objects, where each one represents a single
 //   commandline to parse.
-std::vector<Commandline> AppCommandlineArgs::BuildCommands(winrt::array_view<const winrt::hstring>& args)
+std::vector<Commandline> AppCommandlineArgs::BuildCommands(winrt::array_view<const winrt::hstring> args)
 {
     std::vector<Commandline> commands;
     commands.emplace_back(Commandline{});
@@ -883,7 +983,7 @@ bool AppCommandlineArgs::IsHandoffListener() const noexcept
 // Return Value:
 // - The help text, or an error message, generated from parsing the input
 //   provided by the user.
-const std::string& AppCommandlineArgs::GetExitMessage()
+const std::string& AppCommandlineArgs::GetExitMessage() const noexcept
 {
     return _exitMessage;
 }
@@ -920,10 +1020,21 @@ void AppCommandlineArgs::ValidateStartupCommands()
     // handoff connection from the operating system.
     if (!_isHandoffListener)
     {
+        // If we only have a single x-save command, then set our target to the
+        // current terminal window. This will prevent us from spawning a new
+        // window just to save the commandline.
+        if (_startupActions.size() == 1 &&
+            _startupActions.front().Action() == ShortcutAction::SaveSnippet &&
+            _windowTarget.empty())
+        {
+            _windowTarget = "0";
+        }
         // If we parsed no commands, or the first command we've parsed is not a new
         // tab action, prepend a new-tab command to the front of the list.
-        if (_startupActions.empty() ||
-            _startupActions.front().Action() != ShortcutAction::NewTab)
+        // (also, we don't need to do this if the only action is a x-save)
+        else if (_startupActions.empty() ||
+                 (_startupActions.front().Action() != ShortcutAction::NewTab &&
+                  _startupActions.front().Action() != ShortcutAction::SaveSnippet))
         {
             // Build the NewTab action from the values we've parsed on the commandline.
             NewTerminalArgs newTerminalArgs{};
@@ -969,7 +1080,7 @@ std::optional<til::size> AppCommandlineArgs::GetSize() const noexcept
 // - args: an array of strings to process as a commandline. These args can contain spaces
 // Return Value:
 // - 0 if the commandline was successfully parsed
-int AppCommandlineArgs::ParseArgs(winrt::array_view<const winrt::hstring>& args)
+int AppCommandlineArgs::ParseArgs(winrt::array_view<const winrt::hstring> args)
 {
     for (const auto& arg : args)
     {

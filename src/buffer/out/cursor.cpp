@@ -20,7 +20,6 @@ Cursor::Cursor(const ULONG ulSize, TextBuffer& parentBuffer) noexcept :
     _fBlinkingAllowed(true),
     _fDelay(false),
     _fIsConversionArea(false),
-    _fIsPopupShown(false),
     _fDelayedEolWrap(false),
     _fDeferCursorRedraw(false),
     _fHaveDeferredCursorRedraw(false),
@@ -64,11 +63,6 @@ bool Cursor::IsDouble() const noexcept
 bool Cursor::IsConversionArea() const noexcept
 {
     return _fIsConversionArea;
-}
-
-bool Cursor::IsPopupShown() const noexcept
-{
-    return _fIsPopupShown;
 }
 
 bool Cursor::GetDelay() const noexcept
@@ -123,13 +117,6 @@ void Cursor::SetIsConversionArea(const bool fIsConversionArea) noexcept
     // Never called with TRUE, it's only used in the creation of a
     //      ConversionAreaInfo, and never changed after that.
     _fIsConversionArea = fIsConversionArea;
-    _RedrawCursorAlways();
-}
-
-void Cursor::SetIsPopupShown(const bool fIsPopupShown) noexcept
-{
-    // Functionally the same as "Hide cursor"
-    _fIsPopupShown = fIsPopupShown;
     _RedrawCursorAlways();
 }
 
@@ -188,11 +175,7 @@ void Cursor::_RedrawCursor() noexcept
 // - <none>
 void Cursor::_RedrawCursorAlways() noexcept
 {
-    try
-    {
-        _parentBuffer.TriggerRedrawCursor(_cPosition);
-    }
-    CATCH_LOG();
+    _parentBuffer.NotifyPaintFrame();
 }
 
 void Cursor::SetPosition(const til::point cPosition) noexcept
@@ -286,9 +269,9 @@ void Cursor::CopyProperties(const Cursor& OtherCursor) noexcept
     _cursorType = OtherCursor._cursorType;
 }
 
-void Cursor::DelayEOLWrap(const til::point coordDelayedAt) noexcept
+void Cursor::DelayEOLWrap() noexcept
 {
-    _coordDelayedAt = coordDelayedAt;
+    _coordDelayedAt = _cPosition;
     _fDelayedEolWrap = true;
 }
 

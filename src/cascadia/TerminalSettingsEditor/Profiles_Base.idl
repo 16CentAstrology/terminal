@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import "Profiles.idl";
+import "ProfileViewModel.idl";
 
 namespace Microsoft.Terminal.Settings.Editor
 {
@@ -9,5 +9,7 @@ namespace Microsoft.Terminal.Settings.Editor
     {
         Profiles_Base();
         ProfileViewModel Profile { get; };
+
+        static Windows.UI.Xaml.Controls.IconSource BuiltInIconConverter(IInspectable iconVal);
     }
 }

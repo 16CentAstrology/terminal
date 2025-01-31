@@ -88,9 +88,12 @@ namespace ControlUnitTests
         void _standardInit(winrt::com_ptr<Control::implementation::ControlCore> core,
                            winrt::com_ptr<Control::implementation::ControlInteractivity> interactivity)
         {
-            // "Consolas" ends up with an actual size of 9x21 at 96DPI. So
-            // let's just arbitrarily start with a 270x420px (30x20 chars) window
-            core->Initialize(270, 420, 1.0);
+            // "Consolas" ends up with an actual size of 9x19 at 96DPI. So
+            // let's just arbitrarily start with a 270x380px (30x20 chars) window
+            core->Initialize(270, 380, 1.0);
+#ifndef NDEBUG
+            core->_terminal->_suppressLockChecks = true;
+#endif
             VERIFY_IS_TRUE(core->_initializedTerminal);
             VERIFY_ARE_EQUAL(20, core->_terminal->GetViewport().Height());
             interactivity->Initialize();
@@ -137,14 +140,14 @@ namespace ControlUnitTests
         auto [core, interactivity] = _createCoreAndInteractivity(*settings, *conn);
 
         // A callback to make sure that we're raising TransparencyChanged events
-        auto expectedOpacity = 0.5;
+        auto expectedOpacity = 0.5f;
         auto opacityCallback = [&](auto&&, Control::TransparencyChangedEventArgs args) mutable {
             VERIFY_ARE_EQUAL(expectedOpacity, args.Opacity());
             VERIFY_ARE_EQUAL(expectedOpacity, core->Opacity());
             // The Settings object's opacity shouldn't be changed
-            VERIFY_ARE_EQUAL(0.5, settings->Opacity());
+            VERIFY_ARE_EQUAL(0.5f, settings->Opacity());
 
-            auto expectedUseAcrylic = expectedOpacity < 1.0 &&
+            auto expectedUseAcrylic = expectedOpacity < 1.0f &&
                                       (useAcrylic);
             VERIFY_ARE_EQUAL(useAcrylic, settings->UseAcrylic());
             VERIFY_ARE_EQUAL(expectedUseAcrylic, core->UseAcrylic());
@@ -159,10 +162,10 @@ namespace ControlUnitTests
         for (auto i = 0; i < 55; i++)
         {
             // each mouse wheel only adjusts opacity by .01
-            expectedOpacity += 0.01;
-            if (expectedOpacity >= 1.0)
+            expectedOpacity += 0.01f;
+            if (expectedOpacity >= 1.0f)
             {
-                expectedOpacity = 1.0;
+                expectedOpacity = 1.0f;
             }
 
             // The mouse location and buttons don't matter here.
@@ -177,10 +180,10 @@ namespace ControlUnitTests
         for (auto i = 0; i < 105; i++)
         {
             // each mouse wheel only adjusts opacity by .01
-            expectedOpacity -= 0.01;
-            if (expectedOpacity <= 0.0)
+            expectedOpacity -= 0.01f;
+            if (expectedOpacity <= 0.0f)
             {
-                expectedOpacity = 0.0;
+                expectedOpacity = 0.0f;
             }
 
             // The mouse location and buttons don't matter here.
@@ -227,7 +230,7 @@ namespace ControlUnitTests
                 expectedBufferHeight++;
             }
 
-            conn->WriteInput(L"Foo\r\n");
+            conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
         }
         // We printed that 40 times, but the final \r\n bumped the view down one MORE row.
         VERIFY_ARE_EQUAL(20, core->_terminal->GetViewport().Height());
@@ -333,7 +336,6 @@ namespace ControlUnitTests
                                     true);
         Log::Comment(L"Verify that there's one selection");
         VERIFY_IS_TRUE(core->HasSelection());
-        VERIFY_ARE_EQUAL(1u, core->_terminal->GetSelectionRects().size());
 
         Log::Comment(L"Drag the mouse down a whole row");
         const til::point terminalPosition2{ 1, 1 };
@@ -346,7 +348,6 @@ namespace ControlUnitTests
                                     true);
         Log::Comment(L"Verify that there's now two selections (one on each row)");
         VERIFY_IS_TRUE(core->HasSelection());
-        VERIFY_ARE_EQUAL(2u, core->_terminal->GetSelectionRects().size());
 
         Log::Comment(L"Release the mouse");
         interactivity->PointerReleased(noMouseDown,
@@ -355,7 +356,6 @@ namespace ControlUnitTests
                                        cursorPosition2.to_core_point());
         Log::Comment(L"Verify that there's still two selections");
         VERIFY_IS_TRUE(core->HasSelection());
-        VERIFY_ARE_EQUAL(2u, core->_terminal->GetSelectionRects().size());
 
         Log::Comment(L"click outside the current selection");
         const til::point terminalPosition3{ 2, 2 };
@@ -367,7 +367,6 @@ namespace ControlUnitTests
                                       cursorPosition3.to_core_point());
         Log::Comment(L"Verify that there's now no selection");
         VERIFY_IS_FALSE(core->HasSelection());
-        VERIFY_ARE_EQUAL(0u, core->_terminal->GetSelectionRects().size());
 
         Log::Comment(L"Drag the mouse");
         const til::point terminalPosition4{ 3, 2 };
@@ -380,7 +379,6 @@ namespace ControlUnitTests
                                     true);
         Log::Comment(L"Verify that there's now one selection");
         VERIFY_IS_TRUE(core->HasSelection());
-        VERIFY_ARE_EQUAL(1u, core->_terminal->GetSelectionRects().size());
     }
 
     void ControlInteractivityTests::ScrollWithSelection()
@@ -395,7 +393,7 @@ namespace ControlUnitTests
         Log::Comment(L"Add some test to the terminal so we can scroll");
         for (auto i = 0; i < 40; ++i)
         {
-            conn->WriteInput(L"Foo\r\n");
+            conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
         }
         // We printed that 40 times, but the final \r\n bumped the view down one MORE row.
         VERIFY_ARE_EQUAL(20, core->_terminal->GetViewport().Height());
@@ -435,14 +433,14 @@ namespace ControlUnitTests
                                     true);
         Log::Comment(L"Verify that there's one selection");
         VERIFY_IS_TRUE(core->HasSelection());
-        VERIFY_ARE_EQUAL(1u, core->_terminal->GetSelectionRects().size());
 
         Log::Comment(L"Verify the location of the selection");
         // The viewport is on row 21, so the selection will be on:
         // {(5, 5)+(0, 21)} to {(5, 5)+(0, 21)}
         til::point expectedAnchor{ 5, 26 };
+        til::point expectedEnd{ 6, 26 }; // add 1 to x-coordinate because end is exclusive
         VERIFY_ARE_EQUAL(expectedAnchor, core->_terminal->GetSelectionAnchor());
-        VERIFY_ARE_EQUAL(expectedAnchor, core->_terminal->GetSelectionEnd());
+        VERIFY_ARE_EQUAL(expectedEnd, core->_terminal->GetSelectionEnd());
 
         Log::Comment(L"Scroll up a line, with the left mouse button selected");
         interactivity->MouseWheel(modifiers,
@@ -452,10 +450,11 @@ namespace ControlUnitTests
 
         Log::Comment(L"Verify the location of the selection");
         // The viewport is now on row 20, so the selection will be on:
-        // {(5, 5)+(0, 20)} to {(5, 5)+(0, 21)}
-        til::point newExpectedAnchor{ 5, 25 };
+        // {(5 + 1, 5)+(0, 20)} to {(5, 5)+(0, 21)}
+        // NOTE: newExpectedAnchor should be expectedEnd moved up one row
+        til::point newExpectedAnchor{ 6, 25 };
         // Remember, the anchor is always before the end in the buffer. So yes,
-        // se started the selection on 5,26, but now that's the end.
+        // we started the selection on 5,26, but now that's the end.
         VERIFY_ARE_EQUAL(newExpectedAnchor, core->_terminal->GetSelectionAnchor());
         VERIFY_ARE_EQUAL(expectedAnchor, core->_terminal->GetSelectionEnd());
     }
@@ -472,7 +471,7 @@ namespace ControlUnitTests
 
         for (auto i = 0; i < 40; ++i)
         {
-            conn->WriteInput(L"Foo\r\n");
+            conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
         }
         // We printed that 40 times, but the final \r\n bumped the view down one MORE row.
         VERIFY_ARE_EQUAL(20, core->_terminal->GetViewport().Height());
@@ -531,7 +530,7 @@ namespace ControlUnitTests
         interactivity->MouseWheel(modifiers, delta, mousePos, state); // 2/5
         VERIFY_ARE_EQUAL(21, core->ScrollOffset());
 
-        conn->WriteInput(L"Foo\r\n");
+        conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
         VERIFY_ARE_EQUAL(22, core->ScrollOffset());
         interactivity->MouseWheel(modifiers, delta, mousePos, state); // 1/5
         VERIFY_ARE_EQUAL(22, core->ScrollOffset());
@@ -583,7 +582,6 @@ namespace ControlUnitTests
                                     true);
         Log::Comment(L"Verify that there's one selection");
         VERIFY_IS_TRUE(core->HasSelection());
-        VERIFY_ARE_EQUAL(1u, core->_terminal->GetSelectionRects().size());
 
         Log::Comment(L"Verify that it started on the first cell we clicked on, not the one we dragged to");
         til::point expectedAnchor{ 0, 0 };
@@ -628,12 +626,11 @@ namespace ControlUnitTests
                                     true);
         Log::Comment(L"Verify that there's one selection");
         VERIFY_IS_TRUE(core->HasSelection());
-        VERIFY_ARE_EQUAL(1u, core->_terminal->GetSelectionRects().size());
 
         Log::Comment(L"Verify that it started on the first cell we clicked on, not the one we dragged to");
         til::point expectedAnchor{ 0, 0 };
         VERIFY_ARE_EQUAL(expectedAnchor, core->_terminal->GetSelectionAnchor());
-        til::point expectedEnd{ 2, 0 };
+        til::point expectedEnd{ 3, 0 }; // add 1 to x-coordinate because end is exclusive
         VERIFY_ARE_EQUAL(expectedEnd, core->_terminal->GetSelectionEnd());
 
         interactivity->PointerReleased(noMouseDown,
@@ -696,7 +693,7 @@ namespace ControlUnitTests
                 expectedBufferHeight++;
             }
 
-            conn->WriteInput(L"Foo\r\n");
+            conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
         }
         // We printed that 40 times, but the final \r\n bumped the view down one MORE row.
         VERIFY_ARE_EQUAL(20, core->_terminal->GetViewport().Height());
@@ -718,7 +715,7 @@ namespace ControlUnitTests
         }
 
         // Enable VT mouse event tracking
-        conn->WriteInput(L"\x1b[?1003;1006h");
+        conn->WriteInput(winrt_wstring_to_array_view(L"\x1b[?1003;1006h"));
 
         // Mouse clicks in the inactive region (i.e. the top 10 rows in this case) should not register
         Log::Comment(L"Click on the terminal");
@@ -757,12 +754,14 @@ namespace ControlUnitTests
         _standardInit(core, interactivity);
 
         Log::Comment(L"Fill up the history buffer");
+        const auto scrollbackLength = settings->HistorySize();
         // Output lines equal to history size + viewport height to make sure we're
         // at the point where outputting more lines causes circular incrementing
         for (auto i = 0; i < settings->HistorySize() + core->ViewHeight(); ++i)
         {
-            conn->WriteInput(L"Foo\r\n");
+            conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
         }
+        VERIFY_ARE_EQUAL(scrollbackLength, core->_terminal->GetScrollOffset());
 
         // For this test, don't use any modifiers
         const auto modifiers = ControlKeyStates();
@@ -796,28 +795,108 @@ namespace ControlUnitTests
                                     true);
         Log::Comment(L"Verify that there's one selection");
         VERIFY_IS_TRUE(core->HasSelection());
-        VERIFY_ARE_EQUAL(1u, core->_terminal->GetSelectionRects().size());
 
         Log::Comment(L"Verify the location of the selection");
         // The viewport is on row (historySize + 5), so the selection will be on:
         // {(5, (historySize+5))+(0, 21)} to {(5, (historySize+5))+(0, 21)}
         til::point expectedAnchor{ 5, settings->HistorySize() + 5 };
+        til::point expectedEnd{ 6, expectedAnchor.y }; // add 1 to x-coordinate because end is exclusive
         VERIFY_ARE_EQUAL(expectedAnchor, core->_terminal->GetSelectionAnchor());
-        VERIFY_ARE_EQUAL(expectedAnchor, core->_terminal->GetSelectionEnd());
+        VERIFY_ARE_EQUAL(expectedEnd, core->_terminal->GetSelectionEnd());
 
         Log::Comment(L"Output a line of text");
-        conn->WriteInput(L"Foo\r\n");
+        conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
 
         Log::Comment(L"Verify the location of the selection");
         // The selection should now be 1 row lower
         expectedAnchor.y -= 1;
-        VERIFY_ARE_EQUAL(expectedAnchor, core->_terminal->GetSelectionAnchor());
-        VERIFY_ARE_EQUAL(expectedAnchor, core->_terminal->GetSelectionEnd());
+        expectedEnd.y -= 1;
+        {
+            const auto anchor{ core->_terminal->GetSelectionAnchor() };
+            const auto end{ core->_terminal->GetSelectionEnd() };
+            Log::Comment(fmt::format(L"expectedAnchor:({},{})", expectedAnchor.x, expectedAnchor.y).c_str());
+            Log::Comment(fmt::format(L"anchor:({},{})", anchor.x, anchor.y).c_str());
+            Log::Comment(fmt::format(L"end:({},{})", end.x, end.y).c_str());
+
+            VERIFY_ARE_EQUAL(expectedAnchor, anchor);
+            VERIFY_ARE_EQUAL(expectedEnd, end);
+        }
+        VERIFY_ARE_EQUAL(scrollbackLength - 1, core->_terminal->GetScrollOffset());
+
+        Log::Comment(L"Output a line of text");
+        conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
+
+        Log::Comment(L"Verify the location of the selection");
+        // The selection should now be 1 row lower
+        expectedAnchor.y -= 1;
+        expectedEnd.y -= 1;
+        {
+            const auto anchor{ core->_terminal->GetSelectionAnchor() };
+            const auto end{ core->_terminal->GetSelectionEnd() };
+            Log::Comment(fmt::format(L"expectedAnchor:({},{})", expectedAnchor.x, expectedAnchor.y).c_str());
+            Log::Comment(fmt::format(L"anchor:({},{})", anchor.x, anchor.y).c_str());
+            Log::Comment(fmt::format(L"end:({},{})", end.x, end.y).c_str());
+
+            VERIFY_ARE_EQUAL(expectedAnchor, anchor);
+            VERIFY_ARE_EQUAL(expectedEnd, end);
+        }
+        VERIFY_ARE_EQUAL(scrollbackLength - 2, core->_terminal->GetScrollOffset());
+
+        Log::Comment(L"Move the mouse a little, to update the selection");
+        // At this point, there should only be one selection region! The
+        // viewport moved up to keep the selection at the same relative spot. So
+        // wiggling the cursor should continue to select only the same
+        // character in the buffer (if, albeit in a new location).
+        //
+        // This helps test GH #14462, a regression from #10749.
+        interactivity->PointerMoved(leftMouseDown,
+                                    WM_LBUTTONDOWN, //pointerUpdateKind
+                                    modifiers,
+                                    true, // focused,
+                                    cursorPosition0.to_core_point(),
+                                    true);
+        VERIFY_IS_TRUE(core->HasSelection());
+        {
+            const auto anchor{ core->_terminal->GetSelectionAnchor() };
+            const auto end{ core->_terminal->GetSelectionEnd() };
+            Log::Comment(fmt::format(L"expectedAnchor:({},{})", expectedAnchor.x, expectedAnchor.y).c_str());
+            Log::Comment(fmt::format(L"anchor:({},{})", anchor.x, anchor.y).c_str());
+            Log::Comment(fmt::format(L"end:({},{})", end.x, end.y).c_str());
+
+            // Selection was updated, but we didn't highlight a full cell
+            VERIFY_ARE_EQUAL(expectedAnchor, anchor);
+            VERIFY_ARE_EQUAL(expectedAnchor, end);
+        }
+
+        Log::Comment(L"Output a line and move the mouse a little to update the selection, all at once");
+        // Same as above. The viewport has moved, so the mouse is still over the
+        // same character, even though it's at a new offset.
+        conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
+        expectedAnchor.y -= 1;
+        expectedEnd.y -= 1;
+        VERIFY_ARE_EQUAL(scrollbackLength - 3, core->_terminal->GetScrollOffset());
+        interactivity->PointerMoved(leftMouseDown,
+                                    WM_LBUTTONDOWN, //pointerUpdateKind
+                                    modifiers,
+                                    true, // focused,
+                                    cursorPosition1.to_core_point(),
+                                    true);
+        VERIFY_IS_TRUE(core->HasSelection());
+        {
+            const auto anchor{ core->_terminal->GetSelectionAnchor() };
+            const auto end{ core->_terminal->GetSelectionEnd() };
+            Log::Comment(fmt::format(L"expectedAnchor:({},{})", expectedAnchor.x, expectedAnchor.y).c_str());
+            Log::Comment(fmt::format(L"anchor:({},{})", anchor.x, anchor.y).c_str());
+            Log::Comment(fmt::format(L"end:({},{})", end.x, end.y).c_str());
+
+            VERIFY_ARE_EQUAL(expectedAnchor, anchor);
+            VERIFY_ARE_EQUAL(expectedEnd, end);
+        }
 
         // Output enough text for the selection to get pushed off the buffer
         for (auto i = 0; i < settings->HistorySize() + core->ViewHeight(); ++i)
         {
-            conn->WriteInput(L"Foo\r\n");
+            conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
         }
         // Verify that the selection got reset
         VERIFY_IS_FALSE(core->HasSelection());
@@ -871,7 +950,7 @@ namespace ControlUnitTests
         // Output enough text for view to start scrolling
         for (auto i = 0; i < core->ViewHeight() * 2; ++i)
         {
-            conn->WriteInput(L"Foo\r\n");
+            conn->WriteInput(winrt_wstring_to_array_view(L"Foo\r\n"));
         }
 
         // Start checking output
@@ -926,16 +1005,15 @@ namespace ControlUnitTests
         VERIFY_IS_GREATER_THAN(core->ScrollOffset(), 0);
 
         // Viewport is now above the mutable viewport, so the mouse event
-        // straight up won't be sent to the terminal.
+        // will be clamped to the top line.
 
-        expectedOutput.push_back(L"sentinel"); // Clearly, it won't be this string
+        expectedOutput.push_back(L"\x1b[M &!"); // 5, 1
         interactivity->PointerPressed(leftMouseDown,
                                       WM_LBUTTONDOWN, //pointerUpdateKind
                                       0, // timestamp
                                       modifiers,
                                       cursorPosition0.to_core_point());
         // Flush it out.
-        conn->WriteInput(L"sentinel");
         VERIFY_ARE_EQUAL(0u, expectedOutput.size(), L"Validate we drained all the expected output");
 
         // This is the part as mentioned in GH#12719
@@ -953,8 +1031,9 @@ namespace ControlUnitTests
                                       cursorPosition1.to_core_point());
 
         Log::Comment(L" --- Resize the terminal to be 10 columns wider ---");
-        const auto newSizeInDips{ til::size{ 40, 20 } * fontSize };
-        core->SizeChanged(newSizeInDips.width, newSizeInDips.height);
+        const auto newWidth = 40.0f * fontSize.width;
+        const auto newHeight = 20.0f * fontSize.height;
+        core->SizeChanged(newWidth, newHeight);
 
         Log::Comment(L" --- Click on a spot that's NOW INSIDE the buffer ---");
         // (32 + 35 + 1) = 68 = 'D'

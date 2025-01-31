@@ -8,7 +8,9 @@
       xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
       xmlns:local="using:Microsoft.Terminal.Settings.Editor"
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:mtu="using:Microsoft.Terminal.UI"
       xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+      xmlns:tsm="using:Microsoft.Terminal.Settings.Model"
       mc:Ignorable="d">
 
     <Page.Resources>
@@ -42,11 +44,10 @@
                         <ResourceDictionary x:Key="HighContrast">
                             <!--  Define resources for HighContrast mode here  -->
                             <StaticResource x:Key="SettingsPageBackground"
-                                            ResourceKey="SystemColorWindowColorBrush" />
+                                            ResourceKey="SystemColorWindowBrush" />
                             <StaticResource x:Key="SettingsPageMicaBackground"
-                                            ResourceKey="SystemColorWindowColorBrush" />
+                                            ResourceKey="SystemColorWindowBrush" />
                         </ResourceDictionary>
-
                     </ResourceDictionary.ThemeDictionaries>
                 </ResourceDictionary>
 
@@ -133,10 +134,24 @@
                 </muxc:NavigationViewItem.Icon>
             </muxc:NavigationViewItem>
 
+            <muxc:NavigationViewItem x:Uid="Nav_Compatibility"
+                                     Tag="Compatibility_Nav">
+                <muxc:NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xEC7A;" />
+                </muxc:NavigationViewItem.Icon>
+            </muxc:NavigationViewItem>
+
             <muxc:NavigationViewItem x:Uid="Nav_Actions"
                                      Tag="Actions_Nav">
                 <muxc:NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE765;" />
+                </muxc:NavigationViewItem.Icon>
+            </muxc:NavigationViewItem>
+
+            <muxc:NavigationViewItem x:Uid="Nav_NewTabMenu"
+                                     Tag="NewTabMenu_Nav">
+                <muxc:NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE71d;" />
                 </muxc:NavigationViewItem.Icon>
             </muxc:NavigationViewItem>
 
@@ -169,18 +184,21 @@
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
-            <Frame x:Name="contentFrame"
-                   Grid.Row="0">
-                <Frame.ContentTransitions>
-                    <TransitionCollection>
-                        <NavigationThemeTransition>
-                            <NavigationThemeTransition.DefaultNavigationTransitionInfo>
-                                <DrillInNavigationTransitionInfo />
-                            </NavigationThemeTransition.DefaultNavigationTransitionInfo>
-                        </NavigationThemeTransition>
-                    </TransitionCollection>
-                </Frame.ContentTransitions>
-            </Frame>
+            <ScrollViewer x:Name="SettingsMainPage_ScrollViewer"
+                          Grid.Row="0">
+                <Frame x:Name="contentFrame"
+                       Grid.Row="0">
+                    <Frame.ContentTransitions>
+                        <TransitionCollection>
+                            <NavigationThemeTransition>
+                                <NavigationThemeTransition.DefaultNavigationTransitionInfo>
+                                    <DrillInNavigationTransitionInfo />
+                                </NavigationThemeTransition.DefaultNavigationTransitionInfo>
+                            </NavigationThemeTransition>
+                        </TransitionCollection>
+                    </Frame.ContentTransitions>
+                </Frame>
+            </ScrollViewer>
             <!--  Explicitly set the background color on grid to prevent the navigation animation from overflowing it  -->
             <Grid Grid.Row="1"
                   Height="55"
@@ -189,13 +207,29 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Uid="Settings_UnsavedSettingsWarning"
-                           Margin="30,0,0,0"
-                           HorizontalAlignment="Left"
-                           VerticalAlignment="Center"
-                           Foreground="Goldenrod"
-                           TextAlignment="Left"
-                           Visibility="Collapsed" />
+                <StackPanel Margin="30,0,0,0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center"
+                            Orientation="Vertical">
+                    <TextBlock x:Uid="Settings_UnsavedSettingsWarning"
+                               Foreground="Goldenrod"
+                               TextAlignment="Left"
+                               Visibility="Collapsed" />
+                    <StackPanel VerticalAlignment="Center"
+                                Orientation="Horizontal"
+                                Spacing="4"
+                                Visibility="{x:Bind tsm:CascadiaSettings.IsPortableMode, Mode=OneTime}">
+                        <FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}"
+                                  Foreground="SlateBlue"
+                                  Glyph="&#xE946;" />
+                        <TextBlock Foreground="SlateBlue">
+                            <Run x:Uid="Settings_PortableModeNote" />
+                            <Hyperlink x:Uid="Settings_PortableModeInfoLink">
+                                <Run x:Uid="Settings_PortableModeInfoLinkTextRun" />
+                            </Hyperlink>
+                        </TextBlock>
+                    </StackPanel>
+                </StackPanel>
                 <StackPanel Margin="0,0,30,0"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Center"

@@ -14,21 +14,25 @@ namespace Microsoft.Terminal.Core
 
         Boolean SnapOnInput;
         Boolean AltGrAliasing;
+        String AnswerbackMessage;
 
         String StartingTitle;
         Boolean SuppressApplicationTitle;
         String WordDelimiters;
 
         Boolean ForceVTInput;
+        Boolean AllowVtChecksumReport;
+        Boolean AllowVtClipboardWrite;
         Boolean TrimBlockSelection;
         Boolean DetectURLs;
-        Boolean VtPassthrough;
 
         Windows.Foundation.IReference<Microsoft.Terminal.Core.Color> TabColor;
         Windows.Foundation.IReference<Microsoft.Terminal.Core.Color> StartingTabColor;
 
         Boolean AutoMarkPrompts;
+        Boolean RainbowSuggestions;
 
+        // NOTE! When adding something here, make sure to update ControlProperties.h too!
     };
 
 }
