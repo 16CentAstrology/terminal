@@ -290,7 +290,7 @@ though. **I recommend we ignore this for now, and leave this as a follow-up**.
 For reference, refer to the following from iTerm2:
 ![image](https://user-images.githubusercontent.com/2578976/64075757-fa971980-ccee-11e9-9e44-47aaf3bca76c.png)
 
-We don't have a menu bar like on MacOS, but we do have a tab context menu. We
+We don't have a menu bar like on macOS, but we do have a tab context menu. We
 could add these items as a nested entry under each tab. If we wanted to do this,
 we should also make sure to dynamically change the icon of the MenuItem to
 reflect the current broadcast state.
@@ -346,7 +346,7 @@ asked for these features, then it's inevitable that our users will too 😉
     panes, not just key strokes. But which actions would those be? Moving the
     selection anchors? Copy doesn't really make sense. Paste _does_ though.
     Maybe the open find dialog / next&prev search match actions?
-  - This probably would require it's own spec.
+  - This probably would require its own spec.
 * [iterm2#6007] - Different stripe color for different broadcast modes
   - Have one color to indicate when broadcasting in `global` scope, another in
     `tab` scope, a third in `pane` scope.

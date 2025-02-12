@@ -9,10 +9,12 @@
 #include "JsonUtils.h"
 #include "TerminalSettingsSerializationHelpers.h"
 
+#include "SettingsTheme.g.h"
 #include "ThemeColor.g.cpp"
 #include "WindowTheme.g.cpp"
 #include "TabRowTheme.g.cpp"
 #include "TabTheme.g.cpp"
+#include "ThemePair.g.cpp"
 #include "Theme.g.cpp"
 
 using namespace ::Microsoft::Console;
@@ -27,6 +29,8 @@ namespace winrt
 }
 
 static constexpr std::string_view NameKey{ "name" };
+static constexpr std::string_view LightNameKey{ "light" };
+static constexpr std::string_view DarkNameKey{ "dark" };
 
 static constexpr wchar_t RegKeyDwm[] = L"Software\\Microsoft\\Windows\\DWM";
 static constexpr wchar_t RegKeyAccentColor[] = L"AccentColor";
@@ -53,6 +57,7 @@ static constexpr wchar_t RegKeyAccentColor[] = L"AccentColor";
     }
 
 THEME_OBJECT(WindowTheme, MTSM_THEME_WINDOW_SETTINGS);
+THEME_OBJECT(SettingsTheme, MTSM_THEME_SETTINGS_SETTINGS);
 THEME_OBJECT(TabRowTheme, MTSM_THEME_TABROW_SETTINGS);
 THEME_OBJECT(TabTheme, MTSM_THEME_TAB_SETTINGS);
 
@@ -130,7 +135,7 @@ winrt::WUX::Media::Brush ThemeColor::Evaluate(const winrt::WUX::ResourceDictiona
     case ThemeColorType::Accent:
     {
         // NOTE: There is no canonical way to get the unfocused ACCENT titlebar
-        // color in Windows. Edge uses it's own heuristic, and in Windows 11,
+        // color in Windows. Edge uses its own heuristic, and in Windows 11,
         // much of this logic is rapidly changing. We're not gonna mess with
         // that, since it seems there's no good way to reverse engineer that.
         til::color accentColor = forTitlebar ?
@@ -216,6 +221,7 @@ uint8_t ThemeColor::UnfocusedTabOpacity() const noexcept
     };
 
 THEME_OBJECT_CONVERTER(winrt::Microsoft::Terminal::Settings::Model, WindowTheme, MTSM_THEME_WINDOW_SETTINGS);
+THEME_OBJECT_CONVERTER(winrt::Microsoft::Terminal::Settings::Model, SettingsTheme, MTSM_THEME_SETTINGS_SETTINGS);
 THEME_OBJECT_CONVERTER(winrt::Microsoft::Terminal::Settings::Model, TabRowTheme, MTSM_THEME_TABROW_SETTINGS);
 THEME_OBJECT_CONVERTER(winrt::Microsoft::Terminal::Settings::Model, TabTheme, MTSM_THEME_TAB_SETTINGS);
 
@@ -247,6 +253,10 @@ winrt::com_ptr<Theme> Theme::Copy() const
     if (_Tab)
     {
         theme->_Tab = *winrt::get_self<implementation::TabTheme>(_Tab)->Copy();
+    }
+    if (_Settings)
+    {
+        theme->_Settings = *winrt::get_self<implementation::SettingsTheme>(_Settings)->Copy();
     }
 
     return theme;
@@ -280,6 +290,53 @@ winrt::com_ptr<Theme> Theme::FromJson(const Json::Value& json)
 #undef THEME_SETTINGS_LAYER_JSON
 
     return result;
+}
+
+void Theme::LogSettingChanges(std::set<std::string>& changes, const std::string_view& context)
+{
+#pragma warning(push)
+#pragma warning(disable : 5103) // pasting '{' and 'winrt' does not result in a valid preprocessing token
+
+#define GENERATE_SET_CHECK_AND_JSON_KEYS(type, name, jsonKey, ...) \
+    const bool is##name##Set = _##name != nullptr;                 \
+    std::string_view outer##name##JsonKey = jsonKey;
+
+    MTSM_THEME_SETTINGS(GENERATE_SET_CHECK_AND_JSON_KEYS)
+
+#define LOG_IF_SET(type, name, jsonKey, ...) \
+    if (obj.name() != type{##__VA_ARGS__ })  \
+        changes.emplace(fmt::format(FMT_COMPILE("{}.{}.{}"), context, outerJsonKey, jsonKey));
+
+    if (isWindowSet)
+    {
+        const auto obj = _Window;
+        const auto outerJsonKey = outerWindowJsonKey;
+        MTSM_THEME_WINDOW_SETTINGS(LOG_IF_SET)
+    }
+
+    if (isSettingsSet)
+    {
+        const auto obj = _Settings;
+        const auto outerJsonKey = outerSettingsJsonKey;
+        MTSM_THEME_SETTINGS_SETTINGS(LOG_IF_SET)
+    }
+
+    if (isTabRowSet)
+    {
+        const auto obj = _TabRow;
+        const auto outerJsonKey = outerTabRowJsonKey;
+        MTSM_THEME_TABROW_SETTINGS(LOG_IF_SET)
+    }
+
+    if (isTabSet)
+    {
+        const auto obj = _Tab;
+        const auto outerJsonKey = outerTabJsonKey;
+        MTSM_THEME_TAB_SETTINGS(LOG_IF_SET)
+    }
+#undef LOG_IF_SET
+#undef GENERATE_SET_CHECK_AND_JSON_KEYS
+#pragma warning(pop)
 }
 
 // Method Description:
@@ -320,3 +377,52 @@ winrt::WUX::ElementTheme Theme::RequestedTheme() const noexcept
 {
     return _Window ? _Window.RequestedTheme() : winrt::WUX::ElementTheme::Default;
 }
+
+winrt::com_ptr<ThemePair> ThemePair::FromJson(const Json::Value& json)
+{
+    auto result = winrt::make_self<ThemePair>(L"dark");
+
+    if (json.isString())
+    {
+        result->_DarkName = result->_LightName = JsonUtils::GetValue<winrt::hstring>(json);
+    }
+    else if (json.isObject())
+    {
+        JsonUtils::GetValueForKey(json, DarkNameKey, result->_DarkName);
+        JsonUtils::GetValueForKey(json, LightNameKey, result->_LightName);
+    }
+    return result;
+}
+
+Json::Value ThemePair::ToJson() const
+{
+    if (_DarkName == _LightName)
+    {
+        return JsonUtils::ConversionTrait<winrt::hstring>().ToJson(DarkName());
+    }
+    else
+    {
+        Json::Value json{ Json::ValueType::objectValue };
+
+        JsonUtils::SetValueForKey(json, DarkNameKey, _DarkName);
+        JsonUtils::SetValueForKey(json, LightNameKey, _LightName);
+        return json;
+    }
+}
+winrt::com_ptr<ThemePair> ThemePair::Copy() const
+{
+    auto pair{ winrt::make_self<ThemePair>() };
+    pair->_DarkName = _DarkName;
+    pair->_LightName = _LightName;
+    return pair;
+}
+
+// I'm not even joking, this is the recommended way to do this:
+// https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/apply-windows-themes#know-when-dark-mode-is-enabled
+bool Theme::IsSystemInDarkTheme()
+{
+    static auto isColorLight = [](const winrt::Windows::UI::Color& clr) -> bool {
+        return (((5 * clr.G) + (2 * clr.R) + clr.B) > (8 * 128));
+    };
+    return isColorLight(winrt::Windows::UI::ViewManagement::UISettings().GetColorValue(winrt::Windows::UI::ViewManagement::UIColorType::Foreground));
+};

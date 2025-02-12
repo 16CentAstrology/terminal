@@ -3,13 +3,12 @@
 
 #pragma once
 
-#include "CustomWindowMessages.h"
-#include <wil/resource.h>
-
 template<typename T>
 class BaseWindow
 {
 public:
+    static constexpr UINT CM_UPDATE_TITLE = WM_USER + 0;
+
     virtual ~BaseWindow() = 0;
     static T* GetThisFromHandle(HWND const window) noexcept
     {
@@ -28,7 +27,7 @@ public:
             WINRT_ASSERT(!that->_window);
             that->_window = wil::unique_hwnd(window);
 
-            return that->_OnNcCreate(wparam, lparam);
+            return that->OnNcCreate(wparam, lparam);
         }
         else if (T* that = GetThisFromHandle(window))
         {
@@ -46,13 +45,6 @@ public:
         {
             return HandleDpiChange(_window.get(), wparam, lparam);
         }
-
-        case WM_DESTROY:
-        {
-            PostQuitMessage(0);
-            return 0;
-        }
-
         case WM_SIZE:
         {
             UINT width = LOWORD(lparam);
@@ -210,13 +202,17 @@ protected:
 
     bool _minimized = false;
 
+    void _setupUserData()
+    {
+        SetWindowLongPtr(_window.get(), GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+    }
     // Method Description:
     // - This method is called when the window receives the WM_NCCREATE message.
     // Return Value:
     // - The value returned from the window proc.
-    virtual [[nodiscard]] LRESULT _OnNcCreate(WPARAM wParam, LPARAM lParam) noexcept
+    [[nodiscard]] virtual LRESULT OnNcCreate(WPARAM wParam, LPARAM lParam) noexcept
     {
-        SetWindowLongPtr(_window.get(), GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+        _setupUserData();
 
         EnableNonClientDpiScaling(_window.get());
         _currentDpi = GetDpiForWindow(_window.get());

@@ -18,7 +18,7 @@ namespace winrt::TerminalApp::implementation
 
         TerminalApp::AppLogic Logic();
 
-        void Close();
+        void PrepareForSettingsUI();
 
         bool IsDisposed() const
         {
@@ -26,10 +26,9 @@ namespace winrt::TerminalApp::implementation
         }
 
     private:
-        bool _isUwp = false;
         winrt::Windows::UI::Xaml::Hosting::WindowsXamlManager _windowsXamlManager = nullptr;
-        winrt::Windows::Foundation::Collections::IVector<winrt::Windows::UI::Xaml::Markup::IXamlMetadataProvider> _providers = winrt::single_threaded_vector<Windows::UI::Xaml::Markup::IXamlMetadataProvider>();
         bool _bIsClosed = false;
+        bool _preparedForSettingsUI{ false };
     };
 }
 
